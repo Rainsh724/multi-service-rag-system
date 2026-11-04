@@ -1,8 +1,6 @@
 
 import logging
 
-from opentelemetry import context
-
 from services.rag_service.app.clients.llm_client import LLMClient
 from services.rag_service.app.clients.retrieval_client import RetrievalClient
 from services.rag_service.app.core.config import settings
