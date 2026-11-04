@@ -1,26 +1,83 @@
 import pytest
 
 from services.document_service.app.services.embedding_service import (
+    EmbeddingError,
     EmbeddingService,
 )
 
 
-@pytest.mark.asyncio
-async def test_embedding_api_batch():
-    service = EmbeddingService()
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
 
-    texts = [
-        "هوش مصنوعی در تحلیل داده‌ها کاربرد دارد.",
-        "یادگیری ماشین یکی از شاخه‌های هوش مصنوعی است.",
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeClient:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def post(self, url, json):
+        return FakeResponse(self.payload)
+
+
+@pytest.mark.asyncio
+async def test_embedding_batch_validates_and_orders_vectors():
+    service = EmbeddingService()
+    service.dimension = 3
+
+    client = FakeClient({
+        "data": [
+            {"index": 1, "embedding": [4, 5, 6]},
+            {"index": 0, "embedding": [1, 2, 3]},
+        ]
+    })
+
+    vectors = await service._embed_batch(client, ["first", "second"])
+
+    assert vectors == [
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
     ]
 
-    embeddings = await service.embed_texts(texts)
 
-    assert len(embeddings) == 2
+@pytest.mark.asyncio
+async def test_embedding_rejects_non_object_response():
+    service = EmbeddingService()
+    client = FakeClient(["not", "an", "object"])
 
-    for embedding in embeddings:
-        assert len(embedding) == 768
-        assert all(isinstance(value, float) for value in embedding)
+    with pytest.raises(EmbeddingError, match="JSON object"):
+        await service._embed_batch(client, ["text"])
 
-    print("Number of embeddings:", len(embeddings))
-    print("Embedding dimension:", len(embeddings[0]))
+
+@pytest.mark.asyncio
+async def test_embedding_rejects_non_finite_values():
+    service = EmbeddingService()
+    service.dimension = 2
+    client = FakeClient({
+        "data": [
+            {"index": 0, "embedding": [1.0, float("inf")]}
+        ]
+    })
+
+    with pytest.raises(EmbeddingError, match="invalid numeric"):
+        await service._embed_batch(client, ["text"])
+
+
+@pytest.mark.asyncio
+async def test_embedding_rejects_duplicate_indices():
+    service = EmbeddingService()
+    service.dimension = 1
+    client = FakeClient({
+        "data": [
+            {"index": 0, "embedding": [1]},
+            {"index": 0, "embedding": [2]},
+        ]
+    })
+
+    with pytest.raises(EmbeddingError, match="Duplicate"):
+        await service._embed_batch(client, ["first", "second"])
