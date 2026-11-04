@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,25 +28,22 @@ class ChunkRepository:
             for chunk in request.chunks
         ]
 
-        statement = insert(Chunk).values(records)
+        try:
+            await session.execute(
+                delete(Chunk).where(
+                    Chunk.document_id == request.document_id
+                )
+            )
 
-        statement = statement.on_conflict_do_update(
-            index_elements=[
-                Chunk.document_id,
-                Chunk.chunk_index,
-            ],
-            set_={
-                "filename": statement.excluded.filename,
-                "text": statement.excluded.text,
-                "embedding": statement.excluded.embedding,
-                "page_number": statement.excluded.page_number,
-            },
-        )
+            statement = insert(Chunk).values(records)
+            result = await session.execute(statement)
+            await session.commit()
 
-        result = await session.execute(statement)
-        await session.commit()
+            return result.rowcount or 0
 
-        return result.rowcount or 0
+        except Exception:
+            await session.rollback()
+            raise
 
     @staticmethod
     async def search(

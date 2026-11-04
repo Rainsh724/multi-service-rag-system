@@ -44,3 +44,15 @@ def test_rag_request():
 
     assert request.top_k == 5
     assert request.document_ids is None
+
+
+@pytest.mark.parametrize("question", ["", " ", "   ", "\t\n"])
+def test_rag_request_rejects_blank_question(question):
+    with pytest.raises(ValidationError):
+        RAGRequest(question=question)
+
+
+@pytest.mark.parametrize("query", ["", " ", "   ", "\t\n"])
+def test_retrieval_request_rejects_blank_query(query):
+    with pytest.raises(ValidationError):
+        RetrievalSearchRequest(query=query)

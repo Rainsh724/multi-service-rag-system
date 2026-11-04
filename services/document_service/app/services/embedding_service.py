@@ -32,12 +32,16 @@ class EmbeddingService:
                 "All input texts must be non-empty strings."
             )
 
+        if self.batch_size <= 0:
+            raise EmbeddingError(
+                "Embedding batch size must be greater than zero."
+            )
+
         embeddings = []
 
         async with httpx.AsyncClient(
             timeout=self.timeout,
         ) as client:
-
             for start in range(0, len(texts), self.batch_size):
                 batch = texts[start:start + self.batch_size]
 
@@ -60,9 +64,7 @@ class EmbeddingService:
                 self.api_url,
                 json={"input": texts},
             )
-
             response.raise_for_status()
-
             payload = response.json()
 
         except httpx.TimeoutException as exc:
@@ -84,6 +86,11 @@ class EmbeddingService:
             raise EmbeddingError(
                 "Embedding API returned invalid JSON."
             ) from exc
+
+        if not isinstance(payload, dict):
+            raise EmbeddingError(
+                "Embedding API response must be a JSON object."
+            )
 
         data = payload.get("data")
 
@@ -109,7 +116,8 @@ class EmbeddingService:
             vector = item.get("embedding")
 
             if (
-                not isinstance(index, int)
+                isinstance(index, bool)
+                or not isinstance(index, int)
                 or index < 0
                 or index >= len(texts)
             ):
