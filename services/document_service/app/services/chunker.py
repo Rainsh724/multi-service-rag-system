@@ -1,4 +1,3 @@
-
 import re
 from dataclasses import dataclass
 
@@ -48,9 +47,7 @@ class TextChunker:
             if not text:
                 continue
 
-            page_chunks = self._chunk_text(text)
-
-            for chunk_text in page_chunks:
+            for chunk_text in self._chunk_text(text):
                 chunks.append(
                     TextChunk(
                         chunk_index=len(chunks),
@@ -72,18 +69,11 @@ class TextChunker:
 
         for sentence in sentences:
             sentence = sentence.strip()
-
             if not sentence:
                 continue
 
-            parts = self._split_long_text(sentence)
-
-            for part in parts:
-                candidate = (
-                    f"{current} {part}".strip()
-                    if current
-                    else part
-                )
+            for part in self._split_long_text(sentence):
+                candidate = f"{current} {part}".strip() if current else part
 
                 if len(candidate) <= self.chunk_size:
                     current = candidate
@@ -92,9 +82,8 @@ class TextChunker:
                 if current:
                     chunks.append(current)
 
-                current = self._create_overlap(current) if current else ""
-
-                candidate = f"{current} {part}".strip()
+                overlap = self._create_overlap(current)
+                candidate = f"{overlap} {part}".strip() if overlap else part
 
                 if len(candidate) <= self.chunk_size:
                     current = candidate
@@ -111,19 +100,28 @@ class TextChunker:
         if len(text) <= self.chunk_size:
             return [text]
 
-        words = text.split()
         parts = []
         current = ""
 
-        for word in words:
-            candidate = f"{current} {word}".strip()
+        for word in text.split():
+            if len(word) > self.chunk_size:
+                if current:
+                    parts.append(current)
+                    current = ""
+
+                parts.extend(
+                    word[index:index + self.chunk_size]
+                    for index in range(0, len(word), self.chunk_size)
+                )
+                continue
+
+            candidate = f"{current} {word}".strip() if current else word
 
             if len(candidate) <= self.chunk_size:
                 current = candidate
             else:
                 if current:
                     parts.append(current)
-
                 current = word
 
         if current:
@@ -140,9 +138,7 @@ class TextChunker:
         overlap_length = 0
 
         for word in reversed(words):
-            added_length = len(word) + (
-                1 if overlap_words else 0
-            )
+            added_length = len(word) + (1 if overlap_words else 0)
 
             if overlap_length + added_length > self.chunk_overlap:
                 break
