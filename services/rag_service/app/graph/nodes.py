@@ -1,4 +1,3 @@
-
 import logging
 
 from services.rag_service.app.clients.llm_client import LLMClient
@@ -28,7 +27,6 @@ async def query_processing(state: RAGState) -> dict:
 
 
 async def retrieval(state: RAGState) -> dict:
-    print("RETRIEVAL FUNCTION CALLED", flush=True)
     client = RetrievalClient()
 
     response = await client.search(
@@ -42,24 +40,16 @@ async def retrieval(state: RAGState) -> dict:
         for chunk in response.matches
     ]
 
-    print(
-        "RETRIEVAL DEBUG:",
-        [chunk.get("similarity") for chunk in chunks],
-        flush=True,
-    )
+    similarities = [
+        round(chunk["similarity"], 4)
+        for chunk in chunks
+        if chunk.get("similarity") is not None
+    ]
 
     logger.info(
-        "Retrieval similarities: %s",
-        [
-            round(chunk["similarity"], 4)
-            for chunk in chunks
-            if chunk.get("similarity") is not None
-        ],
-    )
-
-    logger.info(
-        "Semantic retrieval completed: chunks=%d",
+        "Semantic retrieval completed: chunks=%d similarities=%s",
         len(chunks),
+        similarities,
     )
 
     return {
@@ -68,7 +58,6 @@ async def retrieval(state: RAGState) -> dict:
 
 
 async def context_evaluation(state: RAGState) -> dict:
-    print("CONTEXT EVALUATION FUNCTION CALLED", flush=True)
     chunks = state.get("retrieved_chunks", [])
 
     candidates = [
@@ -109,8 +98,6 @@ Rules:
 6. Return exactly one word: YES or NO.
 """
 
-    print("EVALUATION CONTEXT:\n", context, flush=True)
-
     user_prompt = f"""
 Question:
 {state['question']}
@@ -131,19 +118,12 @@ Does this context contain enough information to answer the question?
     finally:
         await llm.client.close()
 
-    sufficient = judgment.strip().upper().startswith("YES")
-
-    print(
-        "EVALUATION DEBUG:",
-        repr(judgment),
-        sufficient,
-        flush=True,
-    )
+    normalized_judgment = judgment.strip().upper().rstrip(".!")
+    sufficient = normalized_judgment == "YES"
 
     logger.info(
-        "Context evaluation: chunks=%d, judgment=%r, sufficient=%s",
+        "Context evaluation completed: chunks=%d sufficient=%s",
         len(candidates),
-        judgment,
         sufficient,
     )
 
