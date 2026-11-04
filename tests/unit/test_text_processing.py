@@ -73,3 +73,18 @@ def test_chunker_rejects_invalid_overlap():
             chunk_size=100,
             chunk_overlap=100,
         )
+
+
+def test_chunker_splits_tokens_longer_than_chunk_size():
+    chunker = TextChunker(
+        chunk_size=10,
+        chunk_overlap=2,
+    )
+    long_token = "abcdefghijklmno"
+
+    chunks = chunker.chunk_pages([
+        ExtractedPage(page_number=1, text=long_token),
+    ])
+
+    assert "".join(chunk.text for chunk in chunks) == long_token
+    assert all(len(chunk.text) <= 10 for chunk in chunks)
