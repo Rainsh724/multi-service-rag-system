@@ -10,13 +10,13 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     storage_path: str = "./storage"
-    max_file_size_mb: int = 50
+    max_file_size_mb: int = Field(default=50, gt=0)
 
     embedding_api_url: str = (
         "http://212.80.22.161:8003/v1/embeddings"
     )
-    embedding_dimension: int = 768
-    embedding_batch_size: int = 16
+    embedding_dimension: int = Field(default=768, gt=0)
+    embedding_batch_size: int = Field(default=16, gt=0)
 
     retrieval_service_url: str = "http://127.0.0.1:8002"
 
@@ -30,4 +30,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
