@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from services.document_service.app.core.config import settings
 from services.document_service.app.core.database import (
     AsyncSessionLocal,
     engine,
@@ -39,8 +40,8 @@ async def _process_document(document_id: UUID) -> dict:
     extractor = PDFExtractor()
     cleaner = TextCleaner()
     chunker = TextChunker(
-        chunk_size=800,
-        chunk_overlap=120,
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
     )
     embedding_service = EmbeddingService()
     retrieval_client = RetrievalClient()
@@ -74,10 +75,8 @@ async def _process_document(document_id: UUID) -> dict:
         )
 
     try:
-        # 1. Extract PDF text
         extracted_pages = extractor.extract(storage_path)
 
-        # 2. Clean extracted text
         cleaned_pages = [
             type(page)(
                 page_number=page.page_number,
@@ -86,7 +85,6 @@ async def _process_document(document_id: UUID) -> dict:
             for page in extracted_pages
         ]
 
-        # 3. Split pages into chunks
         chunks = chunker.chunk_pages(cleaned_pages)
 
         if not chunks:
@@ -94,7 +92,6 @@ async def _process_document(document_id: UUID) -> dict:
                 "No text chunks were generated."
             )
 
-        # 4. Generate embeddings in batches
         texts = [
             chunk.text
             for chunk in chunks
@@ -109,7 +106,6 @@ async def _process_document(document_id: UUID) -> dict:
                 "Embedding count does not match chunk count."
             )
 
-        # 5. Build indexing payload
         chunk_inputs = [
             ChunkInput(
                 chunk_id=uuid4(),
@@ -124,7 +120,6 @@ async def _process_document(document_id: UUID) -> dict:
             )
         ]
 
-        # 6. Send chunks to Retrieval Service
         index_response = await retrieval_client.index_document(
             document_id=document_id,
             filename=filename,
@@ -141,7 +136,6 @@ async def _process_document(document_id: UUID) -> dict:
                 "Indexed chunk count does not match submitted chunk count."
             )
 
-        # 7. Mark document as completed only after successful indexing
         async with AsyncSessionLocal() as session:
             document = await repository.get_by_id(
                 session,
