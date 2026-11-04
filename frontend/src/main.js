@@ -1,3 +1,5 @@
+import "./style.css";
+
 const state = {
   selectedFile: null,
   documents: [],
@@ -92,12 +94,12 @@ function setBusy(button, busy, busyText, normalText) {
 async function checkServices() {
   const label = $("#connection-label");
   try {
-    const [documentHealth, ragHealth] = await Promise.all([
-      fetch("/documents/../health/").catch(() => null),
-      fetch("/health/").catch(() => null),
+    const [documentHealth, retrievalHealth, ragHealth] = await Promise.all([
+      fetch("/health/documents").catch(() => null),
+      fetch("/health/retrieval").catch(() => null),
+      fetch("/health/rag").catch(() => null),
     ]);
-    // Health endpoints are checked directly against the local services by the API docs.
-    const ok = Boolean(documentHealth?.ok && ragHealth?.ok);
+    const ok = Boolean(documentHealth?.ok && retrievalHealth?.ok && ragHealth?.ok);
     label.textContent = ok ? "سرویس‌ها در دسترس‌اند" : "در انتظار اتصال به سرویس‌ها";
     $(".state-dot").classList.toggle("online", ok);
   } catch {
