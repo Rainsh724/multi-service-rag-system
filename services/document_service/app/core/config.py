@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,9 @@ class Settings(BaseSettings):
 
     retrieval_service_url: str = "http://127.0.0.1:8002"
 
+    chunk_size: int = Field(default=800, gt=0)
+    chunk_overlap: int = Field(default=120, ge=0)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
@@ -26,3 +30,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
