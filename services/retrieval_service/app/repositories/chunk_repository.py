@@ -28,17 +28,22 @@ class ChunkRepository:
             for chunk in request.chunks
         ]
 
-        await session.execute(
-            delete(Chunk).where(
-                Chunk.document_id == request.document_id
+        try:
+            await session.execute(
+                delete(Chunk).where(
+                    Chunk.document_id == request.document_id
+                )
             )
-        )
 
-        statement = insert(Chunk).values(records)
-        result = await session.execute(statement)
-        await session.commit()
+            statement = insert(Chunk).values(records)
+            result = await session.execute(statement)
+            await session.commit()
 
-        return result.rowcount or 0
+            return result.rowcount or 0
+
+        except Exception:
+            await session.rollback()
+            raise
 
     @staticmethod
     async def search(
