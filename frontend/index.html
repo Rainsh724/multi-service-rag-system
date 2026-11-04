@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101827" />
+    <meta name="description" content="رابط کاربری سامانه پرسش و پاسخ اسناد فارسی مبتنی بر RAG" />
+    <title>هم‌خوان | دستیار اسناد</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="هم‌خوان">
+          <span class="brand-mark">ه</span>
+          <span><strong>هم‌خوان</strong><small>دستیار هوشمند اسناد</small></span>
+        </a>
+        <div class="service-state"><span class="state-dot"></span><span id="connection-label">در حال بررسی سرویس‌ها...</span></div>
+      </header>
+
+      <main class="layout">
+        <section class="intro">
+          <span class="eyebrow">PERSIAN DOCUMENT INTELLIGENCE</span>
+          <h1>از اسناد خودت<br /><em>سؤال بپرس.</em></h1>
+          <p>فایل PDF را بارگذاری کن، منتظر پردازش بمان و پاسخ پرسش‌هایت را همراه با ارجاع به صفحه منبع دریافت کن.</p>
+          <div class="feature-row"><span>پردازش غیرهم‌زمان</span><span>جست‌وجوی معنایی</span><span>پاسخ مستند</span></div>
+        </section>
+
+        <section class="workspace">
+          <aside class="panel upload-panel">
+            <div class="panel-heading">
+              <div><span class="step">۰۱</span><h2>افزودن سند</h2></div>
+              <span class="file-type">PDF</span>
+            </div>
+            <label class="dropzone" id="dropzone" for="file-input">
+              <input id="file-input" type="file" accept="application/pdf,.pdf" />
+              <span class="upload-icon">↑</span>
+              <strong>فایل PDF را انتخاب کن</strong>
+              <small>یا فایل را اینجا رها کن</small>
+              <span class="choose-file">انتخاب فایل</span>
+            </label>
+            <div id="selected-file" class="selected-file hidden"></div>
+            <button id="upload-button" class="button button-primary full-width" disabled>بارگذاری و پردازش</button>
+            <div id="upload-message" class="notice hidden" role="status"></div>
+            <div class="divider"></div>
+            <div class="section-caption">وضعیت پردازش</div>
+            <div id="document-list" class="document-list">
+              <div class="empty-state">هنوز سندی در این نشست بارگذاری نشده است.</div>
+            </div>
+          </aside>
+
+          <section class="panel chat-panel">
+            <div class="panel-heading">
+              <div><span class="step">۰۲</span><h2>پرسش از اسناد</h2></div>
+              <label class="topk-control">تعداد نتایج
+                <select id="top-k" aria-label="تعداد نتایج بازیابی">
+                  <option value="3">۳</option><option value="5" selected>۵</option><option value="8">۸</option><option value="10">۱۰</option>
+                </select>
+              </label>
+            </div>
+            <div id="conversation" class="conversation">
+              <div class="welcome-card">
+                <div class="welcome-symbol">✳</div>
+                <h3>چه چیزی می‌خواهی بدانی؟</h3>
+                <p>پس از تکمیل پردازش سند، سؤال خودت را به فارسی بنویس. پاسخ‌ها بر اساس محتوای بازیابی‌شده تولید می‌شوند.</p>
+                <div class="suggestions">
+                  <button class="suggestion" data-question="موضوع اصلی این سند چیست؟">موضوع اصلی سند چیست؟</button>
+                  <button class="suggestion" data-question="مهم‌ترین نکات این سند را خلاصه کن.">نکات مهم را خلاصه کن</button>
+                </div>
+              </div>
+            </div>
+            <form id="question-form" class="composer">
+              <textarea id="question-input" rows="2" maxlength="5000" placeholder="سؤالت را درباره سند بنویس..." required></textarea>
+              <div class="composer-footer">
+                <label class="document-filter"><input id="limit-to-current" type="checkbox" checked /> محدود به سند انتخاب‌شده</label>
+                <button id="ask-button" class="button button-primary" type="submit" disabled>ارسال پرسش <span>←</span></button>
+              </div>
+            </form>
+          </section>
+        </section>
+        <footer>هم‌خوان · نمونه رابط کاربری برای سامانه چندسرویسی RAG</footer>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
