@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from shared.schemas.common import BaseSchema
 
@@ -28,6 +28,13 @@ class RetrievalSearchRequest(BaseSchema):
     query: str = Field(min_length=1, max_length=5000)
     top_k: int = Field(default=5, ge=1, le=20)
     document_ids: list[UUID] | None = None
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Query must not be blank.")
+        return value
 
 
 class RetrievedChunk(BaseSchema):
