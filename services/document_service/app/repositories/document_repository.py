@@ -1,7 +1,6 @@
-
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.document_service.app.models.document import Document
@@ -26,6 +25,15 @@ class DocumentRepository:
         document_id: UUID,
     ) -> Document | None:
         return await session.get(Document, document_id)
+
+    @staticmethod
+    async def list_all(
+        session: AsyncSession,
+    ) -> list[Document]:
+        result = await session.execute(
+            select(Document).order_by(desc(Document.created_at))
+        )
+        return list(result.scalars().all())
 
     @staticmethod
     async def get_by_hash(
