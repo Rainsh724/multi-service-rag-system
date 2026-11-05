@@ -122,7 +122,7 @@ Open http://127.0.0.1:5173. The Vite development server proxies requests to the 
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/documents/upload/` | Upload a PDF (multipart field: `file`) |
+| GET | `/documents/` | List previously uploaded documents and their processing status (newest first) |\n| POST | `/documents/upload/` | Upload a PDF (multipart field: `file`) |
 | GET | `/documents/{document_id}/status/` | Read asynchronous processing status |
 | POST | `/retrieval/search/` | Semantic vector search |
 | POST | `/rag/ask/` | Ask a question and receive answer plus sources |

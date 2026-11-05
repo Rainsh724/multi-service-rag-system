@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,11 +8,8 @@ from services.document_service.app.services.document_service import (
     DocumentService,
     DuplicateDocumentError,
 )
-from shared.schemas.documents import DocumentUploadResponse
+from shared.schemas.documents import DocumentUploadResponse, DocumentStatusResponse
 from shared.schemas.common import DocumentStatus
-from uuid import UUID
-
-from shared.schemas.documents import DocumentStatusResponse
 
 from services.document_service.app.tasks.tasks import (
     process_document_task,
@@ -19,6 +18,28 @@ from services.document_service.app.tasks.tasks import (
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 document_service = DocumentService()
+
+
+@router.get(
+    "/",
+    response_model=list[DocumentStatusResponse],
+)
+async def list_documents(
+    session: AsyncSession = Depends(get_db),
+):
+    documents = await document_service.repository.list_all(session)
+
+    return [
+        DocumentStatusResponse(
+            document_id=document.id,
+            filename=document.filename,
+            status=DocumentStatus(document.status),
+            created_at=document.created_at,
+            processed_at=document.processed_at,
+            error_message=document.error_message,
+        )
+        for document in documents
+    ]
 
 
 @router.post(
@@ -47,6 +68,12 @@ async def upload_document(
         try:
             process_document_task.delay(str(document.id))
         except Exception as exc:
+            await document_service.repository.update_status(
+                session,
+                document,
+                status=DocumentStatus.FAILED.value,
+                error_message="Document was uploaded but processing could not be scheduled.",
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Document was uploaded but processing could not be scheduled.",
@@ -63,7 +90,6 @@ async def upload_document(
             status_code=409,
             detail=str(exc),
         )
-
     finally:
         await file.close()
 
@@ -95,6 +121,7 @@ async def get_document_status(
         processed_at=document.processed_at,
         error_message=document.error_message,
     )
+
 
 @router.post(
     "/{document_id}/reprocess/",
