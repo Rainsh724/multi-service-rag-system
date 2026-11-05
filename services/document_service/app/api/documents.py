@@ -95,3 +95,57 @@ async def get_document_status(
         processed_at=document.processed_at,
         error_message=document.error_message,
     )
+
+@router.post(
+    "/{document_id}/reprocess/",
+    response_model=DocumentUploadResponse,
+    status_code=202,
+)
+async def reprocess_document(
+    document_id: UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    document = await document_service.repository.get_by_id(
+        session,
+        document_id,
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.status == DocumentStatus.PROCESSING.value:
+        raise HTTPException(
+            status_code=409,
+            detail="Document is already being processed.",
+        )
+
+    await document_service.repository.update_status(
+        session,
+        document,
+        status=DocumentStatus.PENDING.value,
+        error_message=None,
+        processed_at=None,
+    )
+
+    try:
+        process_document_task.delay(str(document.id))
+    except Exception as exc:
+        await document_service.repository.update_status(
+            session,
+            document,
+            status=DocumentStatus.FAILED.value,
+            error_message="Could not schedule document reprocessing.",
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Document reprocessing could not be scheduled.",
+        ) from exc
+
+    return DocumentUploadResponse(
+        document_id=document.id,
+        filename=document.filename,
+        status=DocumentStatus.PENDING,
+    )
