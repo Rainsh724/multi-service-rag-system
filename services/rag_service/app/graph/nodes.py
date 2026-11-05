@@ -119,7 +119,7 @@ Does this context contain enough information to answer the question?
     finally:
         await llm.client.close()
 
-    match = re.search(r"\b(YES|NO)\b", judgment, flags=re.IGNORECASE)
+    match = re.match(r"^\s*(?:\*\*)?(YES|NO)\b", judgment, flags=re.IGNORECASE)
     sufficient = bool(match and match.group(1).upper() == "YES")
 
     logger.info(
