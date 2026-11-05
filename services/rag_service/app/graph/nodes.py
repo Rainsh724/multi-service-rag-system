@@ -1,4 +1,5 @@
 import logging
+import re
 
 from services.rag_service.app.clients.llm_client import LLMClient
 from services.rag_service.app.clients.retrieval_client import RetrievalClient
@@ -118,13 +119,14 @@ Does this context contain enough information to answer the question?
     finally:
         await llm.client.close()
 
-    normalized_judgment = judgment.strip().upper().rstrip(".!")
-    sufficient = normalized_judgment == "YES"
+    match = re.search(r"\b(YES|NO)\b", judgment, flags=re.IGNORECASE)
+    sufficient = bool(match and match.group(1).upper() == "YES")
 
     logger.info(
-        "Context evaluation completed: chunks=%d sufficient=%s",
+        "Context evaluation completed: chunks=%d sufficient=%s judgment=%r",
         len(candidates),
         sufficient,
+        judgment[:80],
     )
 
     if not sufficient:
