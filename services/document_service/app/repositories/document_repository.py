@@ -63,8 +63,7 @@ class DocumentRepository:
         if page_count is not None:
             document.page_count = page_count
 
-        if processed_at is not None:
-            document.processed_at = processed_at
+        document.processed_at = processed_at
 
         await session.commit()
         await session.refresh(document)
