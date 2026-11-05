@@ -37,6 +37,11 @@ class EmbeddingService:
                 "Embedding batch size must be greater than zero."
             )
 
+        texts = [
+            f"{settings.embedding_document_prefix}{text}"
+            for text in texts
+        ]
+
         embeddings = []
 
         async with httpx.AsyncClient(
