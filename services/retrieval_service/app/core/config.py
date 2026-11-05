@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         "http://212.80.22.161:8003/v1/embeddings"
     )
     embedding_dimension: int = 768
+    embedding_query_prefix: str = "query: "
 
     model_config = SettingsConfigDict(
         env_file=".env",

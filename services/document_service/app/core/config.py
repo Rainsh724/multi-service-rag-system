@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     )
     embedding_dimension: int = Field(default=768, gt=0)
     embedding_batch_size: int = Field(default=16, gt=0)
+    embedding_document_prefix: str = "passage: "
 
     retrieval_service_url: str = "http://127.0.0.1:8002"
 

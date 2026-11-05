@@ -23,7 +23,7 @@ class EmbeddingService:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     self.api_url,
-                    json={"input": query},
+                    json={"input": f"{settings.embedding_query_prefix}{query}"},
                 )
 
                 response.raise_for_status()
