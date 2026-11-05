@@ -48,11 +48,14 @@ function renderDocuments() {
     const active = doc.document_id === state.activeDocumentId;
     const status = String(doc.status).toLowerCase();
     return `
-      <button class="document-item ${active ? "active" : ""}" data-document-id="${escapeHtml(doc.document_id)}">
-        <span class="pdf-icon">PDF</span>
-        <span class="document-meta"><strong>${escapeHtml(doc.filename)}</strong><small>${escapeHtml(statusLabel(status))}</small></span>
-        <span class="status-indicator status-${escapeHtml(status)}"></span>
-      </button>`;
+      <div class="document-row">
+        <button class="document-item ${active ? "active" : ""}" data-document-id="${escapeHtml(doc.document_id)}">
+          <span class="pdf-icon">PDF</span>
+          <span class="document-meta"><strong>${escapeHtml(doc.filename)}</strong><small>${escapeHtml(statusLabel(status))}</small></span>
+          <span class="status-indicator status-${escapeHtml(status)}"></span>
+        </button>
+        ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
+      </div>`;
   }).join("");
 
   documentList.querySelectorAll("[data-document-id]").forEach((button) => {
@@ -60,6 +63,28 @@ function renderDocuments() {
       state.activeDocumentId = button.dataset.documentId;
       renderDocuments();
       updateAskAvailability();
+    });
+  });
+
+  documentList.querySelectorAll("[data-reprocess-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const documentId = button.dataset.reprocessId;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/documents/${documentId}/reprocess/`, {
+          method: "POST",
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "شروع پردازش مجدد ناموفق بود.");
+        const doc = state.documents.find((item) => item.document_id === documentId);
+        if (doc) doc.status = "pending";
+        renderDocuments();
+        setNotice("پردازش مجدد با پیشوندهای صحیح Embedding آغاز شد.", "info");
+        await pollDocument(documentId);
+      } catch (error) {
+        setNotice(error.message, "error");
+        button.disabled = false;
+      }
     });
   });
   updateAskAvailability();
