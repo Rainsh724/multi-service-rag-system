@@ -87,6 +87,7 @@ function renderDocuments() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.detail || "حذف تاریخچه چت ناموفق بود.");
         if (state.activeDocumentId === documentId) {
+          state.chatLoadToken += 1;
           conversation.innerHTML = "";
           showWelcome();
         }
