@@ -1,14 +1,14 @@
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from services.document_service.app.models.document import (
     ChatMessage,
     Document,
     DocumentChat,
 )
-from sqlalchemy.orm import selectinload
 
 
 class DocumentRepository:
