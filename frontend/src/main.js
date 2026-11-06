@@ -8,6 +8,7 @@ const state = {
   asking: false,
   deletingDocumentIds: new Set(),
   deletingChatIds: new Set(),
+  chatLoadToken: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -128,6 +129,7 @@ function renderDocuments() {
 
         if (state.activeDocumentId === documentId) {
           state.activeDocumentId = null;
+          state.chatLoadToken += 1;
           conversation.innerHTML = "";
           showWelcome();
         }
@@ -192,12 +194,13 @@ function showWelcome() {
 }
 
 async function loadChat(documentId) {
+  const loadToken = ++state.chatLoadToken;
   conversation.innerHTML = '<div class="empty-state">در حال بارگذاری تاریخچه گفت‌وگو...</div>';
   try {
     const response = await fetch(`/documents/${documentId}/chat/`);
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "بارگذاری تاریخچه ناموفق بود.");
-    if (state.activeDocumentId !== documentId) return;
+    if (state.activeDocumentId !== documentId || state.chatLoadToken !== loadToken) return;
     conversation.innerHTML = "";
     if (!result.messages?.length) {
       showWelcome();
@@ -207,6 +210,7 @@ async function loadChat(documentId) {
       addMessage(message.role, message.content, message.sources || [], message.insufficient_context);
     }
   } catch (error) {
+    if (state.activeDocumentId !== documentId || state.chatLoadToken !== loadToken) return;
     conversation.innerHTML = "";
     addMessage("assistant", error.message || "بارگذاری تاریخچه گفت‌وگو ناموفق بود.");
   }
