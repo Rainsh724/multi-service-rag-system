@@ -6,6 +6,7 @@ const state = {
   activeDocumentId: null,
   uploading: false,
   asking: false,
+  askingDocumentIds: new Set(),
   deletingDocumentIds: new Set(),
   deletingChatIds: new Set(),
   chatLoadToken: 0,
@@ -58,8 +59,8 @@ function renderDocuments() {
           <span class="status-indicator status-${escapeHtml(status)}"></span>
         </button>
         ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
-        <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) || (state.asking && state.activeDocumentId === doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
-        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) || (state.asking && state.activeDocumentId === doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
+        <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) || state.askingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
+        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) || state.askingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
       </div>`;
   }).join("");
 
@@ -384,6 +385,8 @@ $("#question-form").addEventListener("submit", async (event) => {
 
   questionInput.value = "";
   state.asking = true;
+  state.askingDocumentIds.add(active.document_id);
+  renderDocuments();
   updateAskAvailability();
   setBusy(askButton, true, "در حال جست‌وجو...", "ارسال پرسش ←");
 
@@ -430,6 +433,8 @@ $("#question-form").addEventListener("submit", async (event) => {
     }
   } finally {
     state.asking = false;
+    state.askingDocumentIds.delete(active.document_id);
+    renderDocuments();
     setBusy(askButton, false, "در حال جست‌وجو...", "ارسال پرسش ←");
     updateAskAvailability();
     questionInput.focus();
