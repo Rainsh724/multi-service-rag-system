@@ -6,6 +6,7 @@ const state = {
   activeDocumentId: null,
   uploading: false,
   asking: false,
+  deletingDocumentIds: new Set(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -55,6 +56,7 @@ function renderDocuments() {
           <span class="status-indicator status-${escapeHtml(status)}"></span>
         </button>
         ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
+        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
       </div>`;
   }).join("");
 
@@ -63,6 +65,54 @@ function renderDocuments() {
       state.activeDocumentId = button.dataset.documentId;
       renderDocuments();
       updateAskAvailability();
+    });
+  });
+
+  documentList.querySelectorAll("[data-delete-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const documentId = button.dataset.deleteId;
+      const doc = state.documents.find((item) => item.document_id === documentId);
+      if (!doc || state.deletingDocumentIds.has(documentId)) return;
+
+      const confirmed = window.confirm(
+        `سند «${doc.filename}» و تمام متن‌های استخراج‌شده و embeddingهای آن برای همیشه حذف شوند؟ این عملیات قابل بازگشت نیست.`
+      );
+      if (!confirmed) return;
+
+      state.deletingDocumentIds.add(documentId);
+      renderDocuments();
+      setNotice("در حال حذف سند و داده‌های وابسته...", "info");
+
+      try {
+        const response = await fetch(`/documents/${documentId}/`, {
+          method: "DELETE",
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || "حذف سند ناموفق بود.");
+        }
+
+        state.documents = state.documents.filter(
+          (item) => item.document_id !== documentId
+        );
+
+        if (state.activeDocumentId === documentId) {
+          state.activeDocumentId = null;
+          conversation.innerHTML = `
+            <div class="welcome-card">
+              <div class="welcome-symbol">✳</div>
+              <h3>سند انتخاب نشده است</h3>
+              <p>برای شروع، یک سند آماده را از فهرست انتخاب کن یا فایل PDF جدیدی بارگذاری کن.</p>
+            </div>`;
+        }
+
+        setNotice("سند، فایل PDF و داده‌های بازیابی‌شده آن حذف شدند.", "success");
+      } catch (error) {
+        setNotice(error.message || "حذف سند با خطا مواجه شد.", "error");
+      } finally {
+        state.deletingDocumentIds.delete(documentId);
+        renderDocuments();
+      }
     });
   });
 
