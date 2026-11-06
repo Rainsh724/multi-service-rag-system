@@ -94,7 +94,7 @@ class DocumentChat(Base):
         back_populates="chat",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="ChatMessage.created_at",
+        order_by=lambda: (ChatMessage.created_at, ChatMessage.id),
     )
 
 
