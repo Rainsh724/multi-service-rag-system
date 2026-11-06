@@ -1,3 +1,7 @@
-from services.document_service.app.models.document import Document
+from services.document_service.app.models.document import (
+    ChatMessage,
+    Document,
+    DocumentChat,
+)
 
-__all__ = ["Document"]
+__all__ = ["Document", "DocumentChat", "ChatMessage"]
