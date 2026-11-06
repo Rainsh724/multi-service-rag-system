@@ -5,6 +5,8 @@ from services.document_service.app.core.database import get_db
 from services.document_service.app.services.document_service import (
     DocumentService,
     DuplicateDocumentError,
+    DocumentNotFoundError,
+    DocumentDeletionConflictError,
 )
 from shared.schemas.documents import DocumentUploadResponse
 from shared.schemas.common import DocumentStatus
@@ -95,6 +97,41 @@ async def get_document_status(
         processed_at=document.processed_at,
         error_message=document.error_message,
     )
+
+
+@router.delete("/{document_id}/")
+async def delete_document(
+    document_id: UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        await document_service.delete_document(
+            session=session,
+            document_id=document_id,
+        )
+        return {
+            "document_id": str(document_id),
+            "message": "Document and its indexed chunks were deleted.",
+        }
+
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    except DocumentDeletionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Document deletion failed. The document was not fully deleted.",
+        ) from exc
+
 
 @router.post(
     "/{document_id}/reprocess/",
