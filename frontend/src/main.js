@@ -58,7 +58,7 @@ function renderDocuments() {
         </button>
         ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
         <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) || (state.asking && state.activeDocumentId === doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
-        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
+        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) || (state.asking && state.activeDocumentId === doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
       </div>`;
   }).join("");
 
@@ -197,6 +197,7 @@ async function loadChat(documentId) {
     const response = await fetch(`/documents/${documentId}/chat/`);
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "بارگذاری تاریخچه ناموفق بود.");
+    if (state.activeDocumentId !== documentId) return;
     conversation.innerHTML = "";
     if (!result.messages?.length) {
       showWelcome();
@@ -377,14 +378,18 @@ $("#question-form").addEventListener("submit", async (event) => {
   const active = state.documents.find((doc) => doc.document_id === state.activeDocumentId);
   if (!question || !active || active.status !== "completed" || state.asking) return;
 
-  addMessage("user", question);
   questionInput.value = "";
   state.asking = true;
   updateAskAvailability();
   setBusy(askButton, true, "در حال جست‌وجو...", "ارسال پرسش ←");
 
+  let userMessagePersisted = false;
   try {
     await persistMessage(active.document_id, "user", question);
+    userMessagePersisted = true;
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("user", question);
+    }
     const payload = {
       question,
       top_k: Number($("#top-k").value),
@@ -404,9 +409,21 @@ $("#question-form").addEventListener("submit", async (event) => {
       result.sources || [],
       result.insufficient_context
     );
-    addMessage("assistant", result.answer, result.sources || [], result.insufficient_context);
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("assistant", result.answer, result.sources || [], result.insufficient_context);
+    }
   } catch (error) {
-    addMessage("assistant", error.message || "ارتباط با سرویس پاسخ‌گویی برقرار نشد.");
+    const errorMessage = error.message || "ارتباط با سرویس پاسخ‌گویی برقرار نشد.";
+    if (userMessagePersisted) {
+      try {
+        await persistMessage(active.document_id, "assistant", errorMessage);
+      } catch (saveError) {
+        console.error("Failed to persist the assistant error message:", saveError);
+      }
+    }
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("assistant", errorMessage);
+    }
   } finally {
     state.asking = false;
     setBusy(askButton, false, "در حال جست‌وجو...", "ارسال پرسش ←");
