@@ -1,7 +1,6 @@
-
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.document_service.app.models.document import Document
@@ -39,6 +38,18 @@ class DocumentRepository:
         )
 
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def delete(
+        session: AsyncSession,
+        document: Document,
+    ) -> None:
+        try:
+            await session.delete(document)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
     @staticmethod
     async def update_status(
