@@ -67,3 +67,37 @@ class RetrievalClient:
             raise RetrievalServiceError(
                 "Retrieval Service returned an invalid response."
             ) from exc
+
+    async def delete_document_chunks(self, document_id) -> int:
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                trust_env=False,
+            ) as client:
+                response = await client.delete(
+                    f"{self.base_url}/internal/documents/{document_id}/chunks/"
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return int(payload.get("deleted_count", 0))
+
+        except httpx.TimeoutException as exc:
+            raise RetrievalServiceError(
+                "Retrieval Service deletion request timed out."
+            ) from exc
+
+        except httpx.HTTPStatusError as exc:
+            raise RetrievalServiceError(
+                f"Retrieval Service returned HTTP "
+                f"{exc.response.status_code} during deletion."
+            ) from exc
+
+        except httpx.RequestError as exc:
+            raise RetrievalServiceError(
+                "Could not connect to Retrieval Service for deletion."
+            ) from exc
+
+        except (ValueError, TypeError) as exc:
+            raise RetrievalServiceError(
+                "Retrieval Service returned an invalid deletion response."
+            ) from exc
