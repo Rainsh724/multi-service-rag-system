@@ -57,7 +57,7 @@ function renderDocuments() {
           <span class="status-indicator status-${escapeHtml(status)}"></span>
         </button>
         ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
-        <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
+        <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) || (state.asking && state.activeDocumentId === doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
         <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
       </div>`;
   }).join("");
@@ -234,11 +234,11 @@ async function loadDocuments() {
     if (!response.ok) throw new Error(result.detail || "بارگذاری اسناد ناموفق بود.");
     state.documents = result;
     renderDocuments();
-    const ready = state.documents.find((doc) => doc.status === "completed");
-    if (ready) {
-      state.activeDocumentId = ready.document_id;
+    const initialDocument = state.documents[0];
+    if (initialDocument) {
+      state.activeDocumentId = initialDocument.document_id;
       renderDocuments();
-      await loadChat(ready.document_id);
+      await loadChat(initialDocument.document_id);
     }
   } catch (error) {
     setNotice(error.message || "بازیابی اسناد ذخیره‌شده ناموفق بود.", "error");
@@ -355,6 +355,7 @@ uploadButton.addEventListener("click", async () => {
     state.activeDocumentId = doc.document_id;
     renderDocuments();
     setNotice("فایل دریافت شد؛ پردازش در پس‌زمینه انجام می‌شود.", "info");
+    await loadChat(doc.document_id);
     fileInput.value = "";
     state.selectedFile = null;
     $("#selected-file").classList.add("hidden");
