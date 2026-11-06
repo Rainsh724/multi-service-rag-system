@@ -78,6 +78,30 @@ async def index_document(
         ) from exc
 
 
+@router.delete(
+    "/internal/documents/{document_id}/chunks/",
+)
+async def delete_document_chunks(
+    document_id: UUID,
+    session: AsyncSession = Depends(get_db),
+):
+    try:
+        deleted_count = await repository.delete_document_chunks(
+            session=session,
+            document_id=document_id,
+        )
+        return {
+            "document_id": str(document_id),
+            "deleted_count": deleted_count,
+        }
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete document chunks.",
+        ) from exc
+
+
 @router.post(
     "/search/",
     response_model=RetrievalSearchResponse,
@@ -127,6 +151,7 @@ async def search_chunks(
             status_code=500,
             detail="Retrieval search failed.",
         ) from exc
+
 
 @router.get(
     "/documents/{document_id}/chunks/",

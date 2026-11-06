@@ -4,13 +4,17 @@ from fastapi import FastAPI, HTTPException
 
 from services.document_service.app.api.documents import router as documents_router
 from services.document_service.app.core.database import (
+    Base,
     check_database_connection,
     engine,
 )
+from services.document_service.app.models import ChatMessage, Document, DocumentChat
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()
 

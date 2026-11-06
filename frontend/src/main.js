@@ -6,6 +6,10 @@ const state = {
   activeDocumentId: null,
   uploading: false,
   asking: false,
+  askingDocumentIds: new Set(),
+  deletingDocumentIds: new Set(),
+  deletingChatIds: new Set(),
+  chatLoadToken: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -55,14 +59,90 @@ function renderDocuments() {
           <span class="status-indicator status-${escapeHtml(status)}"></span>
         </button>
         ${status === "completed" || status === "failed" ? `<button class="reprocess-button" data-reprocess-id="${escapeHtml(doc.document_id)}" title="پردازش مجدد با تنظیمات فعلی">↻</button>` : ""}
+        <button class="delete-chat-button" data-delete-chat-id="${escapeHtml(doc.document_id)}" ${state.deletingChatIds.has(doc.document_id) || state.askingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف تاریخچه چت">${state.deletingChatIds.has(doc.document_id) ? "…" : "⌫"}</button>
+        <button class="delete-document-button" data-delete-id="${escapeHtml(doc.document_id)}" ${state.deletingDocumentIds.has(doc.document_id) || state.askingDocumentIds.has(doc.document_id) ? "disabled" : ""} title="حذف کامل سند">${state.deletingDocumentIds.has(doc.document_id) ? "…" : "×"}</button>
       </div>`;
   }).join("");
 
   documentList.querySelectorAll("[data-document-id]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.activeDocumentId = button.dataset.documentId;
       renderDocuments();
       updateAskAvailability();
+      await loadChat(state.activeDocumentId);
+    });
+  });
+
+  documentList.querySelectorAll("[data-delete-chat-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const documentId = button.dataset.deleteChatId;
+      const doc = state.documents.find((item) => item.document_id === documentId);
+      if (!doc || state.deletingChatIds.has(documentId)) return;
+      if (!window.confirm(`تمام پیام‌های گفت‌وگوی «${doc.filename}» حذف شوند؟ فایل و اطلاعات ایندکس‌شده سند باقی می‌مانند.`)) return;
+
+      state.deletingChatIds.add(documentId);
+      renderDocuments();
+      try {
+        const response = await fetch(`/documents/${documentId}/chat/`, { method: "DELETE" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "حذف تاریخچه چت ناموفق بود.");
+        if (state.activeDocumentId === documentId) {
+          state.chatLoadToken += 1;
+          conversation.innerHTML = "";
+          showWelcome();
+        }
+        setNotice("تاریخچه چت حذف شد؛ فایل PDF و داده‌های سند باقی ماندند.", "success");
+      } catch (error) {
+        setNotice(error.message || "حذف تاریخچه چت ناموفق بود.", "error");
+      } finally {
+        state.deletingChatIds.delete(documentId);
+        renderDocuments();
+      }
+    });
+  });
+
+  documentList.querySelectorAll("[data-delete-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const documentId = button.dataset.deleteId;
+      const doc = state.documents.find((item) => item.document_id === documentId);
+      if (!doc || state.deletingDocumentIds.has(documentId)) return;
+
+      const confirmed = window.confirm(
+        `سند «${doc.filename}» و تمام متن‌های استخراج‌شده و embeddingهای آن برای همیشه حذف شوند؟ این عملیات قابل بازگشت نیست.`
+      );
+      if (!confirmed) return;
+
+      state.deletingDocumentIds.add(documentId);
+      renderDocuments();
+      setNotice("در حال حذف سند و داده‌های وابسته...", "info");
+
+      try {
+        const response = await fetch(`/documents/${documentId}/`, {
+          method: "DELETE",
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.detail || "حذف سند ناموفق بود.");
+        }
+
+        state.documents = state.documents.filter(
+          (item) => item.document_id !== documentId
+        );
+
+        if (state.activeDocumentId === documentId) {
+          state.activeDocumentId = null;
+          state.chatLoadToken += 1;
+          conversation.innerHTML = "";
+          showWelcome();
+        }
+
+        setNotice("سند، فایل PDF و داده‌های بازیابی‌شده آن حذف شدند.", "success");
+      } catch (error) {
+        setNotice(error.message || "حذف سند با خطا مواجه شد.", "error");
+      } finally {
+        state.deletingDocumentIds.delete(documentId);
+        renderDocuments();
+      }
     });
   });
 
@@ -93,6 +173,83 @@ function renderDocuments() {
 function updateAskAvailability() {
   const active = state.documents.find((doc) => doc.document_id === state.activeDocumentId);
   askButton.disabled = state.asking || !questionInput.value.trim() || !active || active.status !== "completed";
+}
+
+function showWelcome() {
+  conversation.innerHTML = `
+    <div class="welcome-card">
+      <div class="welcome-symbol">✳</div>
+      <h3>چه چیزی می‌خواهی بدانی؟</h3>
+      <p>پس از تکمیل پردازش سند، سؤال خودت را به فارسی بنویس. پاسخ‌ها بر اساس محتوای بازیابی‌شده تولید می‌شوند.</p>
+      <div class="suggestions">
+        <button class="suggestion" data-question="موضوع اصلی این سند چیست؟">موضوع اصلی سند چیست؟</button>
+        <button class="suggestion" data-question="مهم‌ترین نکات این سند را خلاصه کن.">نکات مهم را خلاصه کن</button>
+      </div>
+    </div>`;
+  conversation.querySelectorAll("[data-question]").forEach((button) => {
+    button.addEventListener("click", () => {
+      questionInput.value = button.dataset.question;
+      questionInput.focus();
+      updateAskAvailability();
+    });
+  });
+}
+
+async function loadChat(documentId) {
+  const loadToken = ++state.chatLoadToken;
+  conversation.innerHTML = '<div class="empty-state">در حال بارگذاری تاریخچه گفت‌وگو...</div>';
+  try {
+    const response = await fetch(`/documents/${documentId}/chat/`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "بارگذاری تاریخچه ناموفق بود.");
+    if (state.activeDocumentId !== documentId || state.chatLoadToken !== loadToken) return;
+    conversation.innerHTML = "";
+    if (!result.messages?.length) {
+      showWelcome();
+      return;
+    }
+    for (const message of result.messages) {
+      addMessage(message.role, message.content, message.sources || [], message.insufficient_context);
+    }
+  } catch (error) {
+    if (state.activeDocumentId !== documentId || state.chatLoadToken !== loadToken) return;
+    conversation.innerHTML = "";
+    addMessage("assistant", error.message || "بارگذاری تاریخچه گفت‌وگو ناموفق بود.");
+  }
+}
+
+async function persistMessage(documentId, role, content, sources = [], insufficientContext = false) {
+  const response = await fetch(`/documents/${documentId}/chat/messages/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      role,
+      content,
+      sources,
+      insufficient_context: insufficientContext,
+    }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail || "ذخیره پیام در تاریخچه ناموفق بود.");
+  return result;
+}
+
+async function loadDocuments() {
+  try {
+    const response = await fetch("/documents/");
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "بارگذاری اسناد ناموفق بود.");
+    state.documents = result;
+    renderDocuments();
+    const initialDocument = state.documents[0];
+    if (initialDocument) {
+      state.activeDocumentId = initialDocument.document_id;
+      renderDocuments();
+      await loadChat(initialDocument.document_id);
+    }
+  } catch (error) {
+    setNotice(error.message || "بازیابی اسناد ذخیره‌شده ناموفق بود.", "error");
+  }
 }
 
 function addMessage(role, content, sources = [], insufficient = false) {
@@ -205,6 +362,7 @@ uploadButton.addEventListener("click", async () => {
     state.activeDocumentId = doc.document_id;
     renderDocuments();
     setNotice("فایل دریافت شد؛ پردازش در پس‌زمینه انجام می‌شود.", "info");
+    await loadChat(doc.document_id);
     fileInput.value = "";
     state.selectedFile = null;
     $("#selected-file").classList.add("hidden");
@@ -226,13 +384,20 @@ $("#question-form").addEventListener("submit", async (event) => {
   const active = state.documents.find((doc) => doc.document_id === state.activeDocumentId);
   if (!question || !active || active.status !== "completed" || state.asking) return;
 
-  addMessage("user", question);
   questionInput.value = "";
   state.asking = true;
+  state.askingDocumentIds.add(active.document_id);
+  renderDocuments();
   updateAskAvailability();
   setBusy(askButton, true, "در حال جست‌وجو...", "ارسال پرسش ←");
 
+  let userMessagePersisted = false;
   try {
+    await persistMessage(active.document_id, "user", question);
+    userMessagePersisted = true;
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("user", question);
+    }
     const payload = {
       question,
       top_k: Number($("#top-k").value),
@@ -245,11 +410,32 @@ $("#question-form").addEventListener("submit", async (event) => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "اجرای پرسش ناموفق بود.");
-    addMessage("assistant", result.answer, result.sources || [], result.insufficient_context);
+    await persistMessage(
+      active.document_id,
+      "assistant",
+      result.answer,
+      result.sources || [],
+      result.insufficient_context
+    );
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("assistant", result.answer, result.sources || [], result.insufficient_context);
+    }
   } catch (error) {
-    addMessage("assistant", error.message || "ارتباط با سرویس پاسخ‌گویی برقرار نشد.");
+    const errorMessage = error.message || "ارتباط با سرویس پاسخ‌گویی برقرار نشد.";
+    if (userMessagePersisted) {
+      try {
+        await persistMessage(active.document_id, "assistant", errorMessage);
+      } catch (saveError) {
+        console.error("Failed to persist the assistant error message:", saveError);
+      }
+    }
+    if (state.activeDocumentId === active.document_id) {
+      addMessage("assistant", errorMessage);
+    }
   } finally {
     state.asking = false;
+    state.askingDocumentIds.delete(active.document_id);
+    renderDocuments();
     setBusy(askButton, false, "در حال جست‌وجو...", "ارسال پرسش ←");
     updateAskAvailability();
     questionInput.focus();
@@ -265,3 +451,4 @@ document.querySelectorAll("[data-question]").forEach((button) => {
 });
 
 checkServices();
+loadDocuments();
