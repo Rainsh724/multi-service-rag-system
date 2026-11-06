@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.retrieval_service.app.models.chunk import Chunk
@@ -41,6 +40,23 @@ class ChunkRepository:
 
             return result.rowcount or 0
 
+        except Exception:
+            await session.rollback()
+            raise
+
+    @staticmethod
+    async def delete_document_chunks(
+        session: AsyncSession,
+        document_id: UUID,
+    ) -> int:
+        try:
+            result = await session.execute(
+                delete(Chunk).where(
+                    Chunk.document_id == document_id
+                )
+            )
+            await session.commit()
+            return result.rowcount or 0
         except Exception:
             await session.rollback()
             raise
