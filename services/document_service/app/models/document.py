@@ -63,10 +63,6 @@ class Document(Base):
         nullable=True,
     )
 
-from sqlalchemy import Boolean, ForeignKey, JSON
-from sqlalchemy.orm import relationship
-
-
 class DocumentChat(Base):
     __tablename__ = "document_chats"
 
