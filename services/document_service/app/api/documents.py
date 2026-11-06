@@ -13,7 +13,6 @@ from services.document_service.app.services.document_service import (
     DocumentNotFoundError,
     DocumentDeletionConflictError,
 )
-from services.document_service.app.models.document import DocumentChat
 from shared.schemas.documents import (
     DocumentUploadResponse,
     DocumentStatusResponse,
