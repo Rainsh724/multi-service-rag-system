@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.document_service.app.core.database import get_db
@@ -19,7 +19,6 @@ from shared.schemas.documents import (
     DocumentStatusResponse,
 )
 from shared.schemas.common import DocumentStatus
-from shared.schemas.rag import RAGResponse
 from services.document_service.app.tasks.tasks import process_document_task
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
