@@ -6,12 +6,15 @@ A three-service Retrieval-Augmented Generation (RAG) application for uploading P
 
 | Component | Responsibility | Local URL |
 |---|---|---|
-| Document Service | PDF upload, text extraction, cleaning, chunking, embeddings, async processing | http://127.0.0.1:8001 |
+| Document Service | PDF upload, extraction, cleaning, chunking, embeddings and async processing | http://127.0.0.1:8001 |
 | Retrieval Service | PostgreSQL/pgvector indexing and semantic Top-K search | http://127.0.0.1:8002 |
-| RAG Orchestrator | LangGraph workflow, context evaluation, answer generation and abstention | http://127.0.0.1:8000 |
+| RAG Orchestrator | LangGraph workflow, context evaluation and answer generation | http://127.0.0.1:8000 |
 | PostgreSQL + pgvector | Document metadata and vector storage | 127.0.0.1:5433 |
 | Redis | Celery broker and result backend | 127.0.0.1:6379 |
+| Celery Worker | Asynchronous PDF processing | Internal Docker network |
 | Web UI | Persian PDF upload, processing status and document Q&A | http://127.0.0.1:5173 |
+
+All backend services, the Celery worker, PostgreSQL and Redis run as separate Docker Compose services. The frontend remains a local Vite development server.
 
 ### RAG workflow
 
@@ -25,9 +28,8 @@ A three-service Retrieval-Augmented Generation (RAG) application for uploading P
 
 ## Requirements
 
-- Python 3.12+
-- Node.js 20+ and npm
-- Docker Desktop / Docker Engine
+- Docker Desktop / Docker Engine with Docker Compose
+- Node.js 20+ and npm (for the frontend)
 - An OpenAI-compatible chat model endpoint and an embedding endpoint
 
 ## Configuration
@@ -38,77 +40,47 @@ From the repository root:
 Copy-Item .env.example .env
 ```
 
-Set the values in `.env` for your environment. In particular, configure:
-
-- `POSTGRES_PASSWORD` and `DATABASE_URL`
-- `LLM_API_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`
-- `EMBEDDING_API_URL` and `EMBEDDING_DIMENSION`
+Set a non-default `POSTGRES_PASSWORD`, and configure `LLM_API_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_API_URL`, and `EMBEDDING_DIMENSION` in `.env`.
 
 The embedding service and Retrieval Service must use the same embedding model and vector dimension. The current schema is configured for 768-dimensional vectors.
 
-## Run locally (Windows PowerShell)
-
-### 1. Start infrastructure
-
-```powershell
-docker compose up -d
-docker compose ps
-```
-
-Wait until PostgreSQL and Redis report healthy.
-
-### 2. Create the Python environment and install service dependencies
+## Run the full backend with Docker Compose
 
 Run from the repository root:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r services/document_service/app/requirements.txt
-pip install -r services/retrieval_service/app/requirements.txt
-pip install -r services/rag_service/app/requirements.txt
+Copy-Item .env.example .env
+# Edit .env and set POSTGRES_PASSWORD and your LLM credentials.
+docker compose config
+docker compose up --build -d
+docker compose ps
 ```
 
-### 3. Initialize databases
+Compose builds and starts PostgreSQL, Redis, Retrieval Service, Document Service, the Celery Worker and RAG Service. The retrieval tables are initialized during service startup; Document Service creates its metadata tables on startup. Health checks and dependency conditions control startup order.
+
+API documentation:
+
+- Document Service: http://127.0.0.1:8001/docs
+- Retrieval Service: http://127.0.0.1:8002/docs
+- RAG Orchestrator: http://127.0.0.1:8000/docs
+
+Check logs:
 
 ```powershell
-python -m scripts.init_db
-python -m services.retrieval_service.app.init_db
+docker compose logs -f document-service retrieval-service rag-service celery-worker
 ```
 
-### 4. Start the three API services
-
-Open separate PowerShell terminals, activate the same virtual environment in each, and run:
-
-**Terminal 1 — Document Service**
-```powershell
-uvicorn services.document_service.app.main:app --host 127.0.0.1 --port 8001
-```
-
-**Terminal 2 — Retrieval Service**
-```powershell
-uvicorn services.retrieval_service.app.main:app --host 127.0.0.1 --port 8002
-```
-
-**Terminal 3 — RAG Orchestrator**
-```powershell
-uvicorn services.rag_service.app.main:app --host 127.0.0.1 --port 8000
-```
-
-### 5. Start the Celery worker
-
-Open another terminal, activate the virtual environment, and run:
+Stop the stack without deleting persistent data:
 
 ```powershell
-celery -A services.document_service.app.tasks.celery_app.celery_app worker --loglevel=info --pool=solo
+docker compose down
 ```
 
-The worker is required for asynchronous PDF processing. Keep it running while uploading documents.
+Do not use `docker compose down -v` unless you intentionally want to delete the PostgreSQL, Redis and document-storage volumes.
 
-### 6. Start the web interface
+## Run the frontend
 
-Open another terminal:
+The Vite development server runs on the host and proxies API requests to the published localhost ports:
 
 ```powershell
 cd frontend
@@ -116,7 +88,11 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. The Vite development server proxies requests to the three local APIs, so separate browser CORS configuration is not needed for local development.
+Open http://127.0.0.1:5173.
+
+## Local Python development (optional)
+
+For debugging a backend service directly on Windows, stop its corresponding Compose container first to avoid a port conflict. Start PostgreSQL and Redis with Compose, then use a Python 3.12 virtual environment and install each service's requirements file. The local-host URLs in `.env.example` are intended for this mode; Compose overrides database, Redis and inter-service URLs with Docker DNS names.
 
 ## API endpoints
 
@@ -128,25 +104,19 @@ Open http://127.0.0.1:5173. The Vite development server proxies requests to the 
 | POST | `/rag/ask/` | Ask a question and receive answer plus sources |
 | GET | `/health/` | Service health check |
 
-Interactive API documentation is available at:
-
-- Document Service: http://127.0.0.1:8001/docs
-- Retrieval Service: http://127.0.0.1:8002/docs
-- RAG Orchestrator: http://127.0.0.1:8000/docs
-
 ## Tests
 
-Run the local unit tests from the repository root:
+Run unit tests from the repository root in a configured Python environment:
 
 ```powershell
 python -m pytest tests/unit -v
 ```
 
-Some tests may require external services or environment configuration depending on the test implementation. Review test requirements before running tests that call live embedding or LLM APIs.
+Some tests may require external services or environment configuration depending on the test implementation.
 
 ## Notes
 
 - PDF processing is asynchronous; a successful upload means the job was accepted, not that indexing has finished.
 - Ask questions only after the document status becomes `completed`.
-- The web UI is a lightweight development interface, not a production deployment. Authentication, authorization, production CORS policy, rate limiting, and deployment hardening are outside its current scope.
+- The web UI is a lightweight development interface, not a production deployment. Authentication, authorization, production CORS policy, rate limiting and deployment hardening are outside its current scope.
 - Do not commit your real `.env` file or API credentials.
