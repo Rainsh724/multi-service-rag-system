@@ -1,31 +1,31 @@
 # Multi-Service Persian RAG System
 
-A three-service Retrieval-Augmented Generation (RAG) application for uploading Persian PDF documents, processing them asynchronously, retrieving semantically relevant chunks, and answering questions with page-level source references.
+A local, Dockerized Retrieval-Augmented Generation system for Persian PDF documents. The project separates document ingestion, vector indexing, and answer generation into three FastAPI services, with a host-run Vite frontend for interaction.
 
-The backend is containerized with Docker Compose. The Persian Vite frontend currently runs separately on the host machine.
+This repository is implemented as a development-oriented stack rather than a production deployment. It is designed to run locally with Docker Compose, PostgreSQL + pgvector, Redis, Celery, and an external OpenAI-compatible embedding/chat provider.
 
 ## Architecture
 
-| Component | Responsibility | Host address |
+| Component | Role | Local endpoint / access |
 |---|---|---|
-| RAG Orchestrator | FastAPI entry point for questions; runs the LangGraph RAG workflow | http://127.0.0.1:8000 |
-| Document Service | PDF upload, metadata/status management, and document-processing coordination | http://127.0.0.1:8001 |
-| Retrieval Service | Vector persistence and semantic Top-K search using pgvector | http://127.0.0.1:8002 |
-| PostgreSQL + pgvector | Persistent document metadata and embedding storage | 127.0.0.1:5433 |
-| Redis | Celery broker and result backend | 127.0.0.1:6379 |
-| Celery Worker | Asynchronous PDF processing tasks | Internal Docker network |
-| Web UI | Persian document upload, processing status, and document Q&A | http://127.0.0.1:5173 |
+| `rag-service` | FastAPI orchestrator; runs the LangGraph RAG workflow and returns grounded answers | `http://127.0.0.1:8000` |
+| `document-service` | Uploads PDFs, stores metadata, manages chat history, and schedules async processing | `http://127.0.0.1:8001` |
+| `retrieval-service` | Creates embeddings for query text and stores/indexes chunk vectors in PostgreSQL using pgvector | `http://127.0.0.1:8002` |
+| `celery-worker` | Asynchronous PDF extraction, text cleaning, chunking, embedding, and indexing job runner | internal Docker network |
+| `postgres` | PostgreSQL with pgvector extension; stores document metadata and chunk vectors | `127.0.0.1:5433` |
+| `redis` | Celery broker and result backend | `127.0.0.1:6379` |
+| `frontend` | Vite-based Persian web UI | `http://127.0.0.1:5173` |
 
 ### Service communication
 
-All backend containers join the Docker Compose network and communicate through Compose service names rather than `localhost`:
+The backend containers communicate over Docker Compose networking using service names, not `localhost`:
 
-- RAG Orchestrator → `http://retrieval-service:8002`
-- Document Service / Celery Worker → `http://retrieval-service:8002`
-- Backend services → PostgreSQL at `postgres:5432`
-- Document Service / Celery Worker → Redis at `redis:6379`
+- `rag-service` → `http://retrieval-service:8002`
+- `document-service` / `celery-worker` → `http://retrieval-service:8002`
+- `document-service` / `celery-worker` → `redis://redis:6379/0`
+- all backend services → PostgreSQL at `postgres:5432`
 
-The published ports are bound to `127.0.0.1`, so the APIs and database are exposed on the local machine rather than on every network interface.
+The published ports are bound to `127.0.0.1`, so the APIs are exposed on the local machine rather than on all interfaces.
 
 ### Architecture diagram
 
@@ -38,124 +38,181 @@ flowchart TB
     RET["Retrieval Service<br/>FastAPI :8002"]
     DB[("PostgreSQL + pgvector")]
     RAG["RAG Orchestrator<br/>FastAPI :8000"]
-    LLM["Embedding API"]
-    CHAT["Chat Model API"]
+    EMB["Embedding API"]
+    LLM["Chat Model API"]
 
-    UI -->|"Upload PDF / status"| DOC
-    DOC -->|"Enqueue task"| REDIS
+    UI -->|"Upload PDF / status / chat"| DOC
+    DOC -->|"Schedule async job"| REDIS
     REDIS --> WORKER
-    WORKER -->|"Extract, clean, chunk"| WORKER
-    WORKER -->|"Create embeddings"| LLM
-    WORKER -->|"Send chunks + metadata"| RET
+    WORKER -->|"Extract and clean text"| WORKER
+    WORKER -->|"Create document embeddings"| EMB
+    WORKER -->|"Index chunks and metadata"| RET
     RET <--> DB
+
     UI -->|"Ask question"| RAG
-    RAG -->|"Retrieve context"| RET
-    RAG -->|"Generate grounded answer"| CHAT
-    RAG -->|"Answer + source references"| UI
+    RAG -->|"Semantic retrieval"| RET
+    RET -->|"Query embeddings"| EMB
+    RAG -->|"Grounded answer via LLM"| LLM
+    RAG -->|"Answer + source refs"| UI
 ```
 
-### Document ingestion flow
+## Real flow in this codebase
 
-1. The frontend uploads a PDF to the Document Service.
-2. The Document Service records document metadata and dispatches an asynchronous Celery task through Redis.
-3. The Celery Worker extracts text, cleans it, splits it into chunks, and requests embeddings from the configured embedding endpoint.
-4. The worker sends chunks, vectors, and metadata to the Retrieval Service.
-5. The Retrieval Service persists vector data in PostgreSQL using pgvector. The frontend can poll the document status endpoint while processing is in progress.
+### 1) Document upload and ingestion
 
-### Question answering and LangGraph flow
+1. The frontend uploads a PDF to `POST /documents/upload/`.
+2. The `document-service` saves the original file under a document-specific storage directory.
+3. The service records metadata in PostgreSQL (`documents` table), creates a chat record, and schedules a Celery task.
+4. The Celery worker runs `process_document_task`.
+5. The worker:
+   - validates the PDF signature and structure,
+   - extracts text with PyMuPDF,
+   - normalizes Persian text,
+   - splits the text into chunks with overlap,
+   - requests embeddings from the configured embedding endpoint,
+   - sends `IndexRequest` payloads to `POST /internal/index/` on the retrieval service.
+6. The retrieval service writes chunk vectors and metadata into the `chunks` table using `pgvector`.
+7. The document status changes to `completed` or `failed` depending on the result.
 
-1. The frontend sends a question to `POST /rag/ask/`.
-2. The RAG Orchestrator starts the LangGraph workflow.
-3. The workflow obtains semantically relevant chunks from `POST /retrieval/search/` through the Retrieval Service.
-4. Retrieved context is evaluated for relevance and sufficiency.
-5. If the context is sufficient, the configured chat model generates a grounded answer with source references. If it is insufficient, the workflow returns the configured abstention / insufficient-context response instead of presenting unsupported information.
+### 2) Retrieval and semantic search
 
-The following is a conceptual view of the workflow stages; it intentionally describes the observable RAG flow rather than prescribing internal LangGraph node names.
+The retrieval service exposes:
 
-```mermaid
-flowchart TD
-    A["Question received<br/>POST /rag/ask/"] --> B["Start LangGraph workflow"]
-    B --> C["Retrieve relevant chunks<br/>Retrieval Service"]
-    C --> D["Evaluate retrieved context"]
-    D --> E{"Context sufficient?"}
-    E -->|"Yes"| F["Generate grounded answer<br/>Chat Model API"]
-    E -->|"No"| G["Insufficient-context response"]
-    F --> H["Attach source references"]
-    G --> I["Return response"]
-    H --> I
+- `POST /search/` for vector search
+- `GET /documents/{document_id}/chunks/` for retrieving chunks by document
+- `POST /internal/index/` for indexing a document's chunks
+- `DELETE /internal/documents/{document_id}/chunks/` for deletion cleanup
+
+The search implementation uses cosine distance, then returns results ordered by highest similarity. For each query, the retrieval service creates an embedding via the configured embedding API and performs vector search against the `chunks` table.
+
+### 3) Question answering via LangGraph
+
+The `rag-service` includes a LangGraph workflow with these stages:
+
+1. `query_processing`
+2. `retrieval`
+3. `context_evaluation`
+4. `answer_generation`
+5. `response_formatting`
+
+The implemented flow is:
+
+- The API receives `POST /rag/ask/` with a question and optional `document_ids` and `top_k`.
+- The query is normalized.
+- The system calls the retrieval service for top-k relevant chunks.
+- A second LLM call evaluates whether the retrieved context is sufficient.
+- If valid, the answer is generated strictly from the retrieved context.
+- The response includes the answer, source references, and an `insufficient_context` flag.
+
+This matches the README's conceptual RAG flow, but the actual implementation is more explicit than the diagram.
+
+## What is implemented in the repo
+
+The repository contains the following concrete structure:
+
+```text
+.
+├── Dockerfile
+├── docker-compose.yml
+├── README.md
+├── .env.example
+├── SQL/
+│   └── DB.sql
+├── frontend/
+│   ├── index.html
+│   ├── package.json
+│   ├── src/
+│   └── vite.config.js
+├── scripts/
+│   └── init_db.py
+├── services/
+│   ├── document_service/
+│   │   ├── app/
+│   │   └── requirements.txt
+│   ├── rag_service/
+│   │   ├── app/
+│   │   └── requirements.txt
+│   └── retrieval_service/
+│       ├── app/
+│       └── requirements.txt
+├── shared/
+│   ├── schemas/
+│   └── clients/
+├── tests/
+│   └── unit/
+├── pytest.ini
+└── .gitignore
 ```
 
-## Technical decisions
+## Stack and libraries
 
-- **Service separation:** document ingestion, vector retrieval, and question answering are isolated behind separate FastAPI services. This keeps responsibilities clear and allows each service to be built and operated independently.
-- **Asynchronous ingestion:** PDF processing is delegated to Celery so a potentially long-running extraction and embedding pipeline does not block the upload request.
-- **Redis + Celery:** Redis is used as the task broker/result backend; the worker consumes background jobs independently of the API process.
-- **PostgreSQL + pgvector:** relational metadata and vector embeddings are stored in PostgreSQL, avoiding a separate vector database for the current scope.
-- **Docker Compose:** backend services and infrastructure run in a reproducible local container network. Compose health checks and dependency conditions gate service startup.
-- **Host-run frontend:** the Vite development UI remains outside Compose and reaches the backend through the localhost-published API ports.
-- **Persistent volumes:** PostgreSQL, Redis, and uploaded document storage use named volumes so normal container recreation does not erase persisted data.
-- **Environment-based configuration:** secrets and environment-specific endpoints are supplied through `.env`; the real `.env` file must not be committed.
+- Language: Python, JavaScript (frontend), HTML/CSS
+- Runtime: FastAPI + Celery + LangGraph + SQLAlchemy + pgvector
+- Main libraries:
+  - `fastapi`
+  - `sqlalchemy[asyncio]`
+  - `pgvector`
+  - `celery[redis]`
+  - `langgraph`
+  - `pymupdf`
+  - `openai`
+  - `vite`
 
 ## Requirements
 
-- Docker Desktop / Docker Engine with Docker Compose
-- Node.js 20+ and npm (for the frontend)
-- An OpenAI-compatible chat model endpoint
-- A compatible embedding endpoint
+- Docker Desktop / Docker Engine with Compose
+- Python 3.12 for backend local debugging
+- Node.js 20+ and npm for the frontend
+- An OpenAI-compatible chat endpoint
+- A compatible embedding endpoint whose output dimension matches the configured schema
 
 ## Configuration
 
-From the repository root, create `.env` only if it does not already exist:
+From the repository root:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Edit `.env` and set at least:
+Then set at least:
 
-- `POSTGRES_PASSWORD` — use a strong non-default password.
-- `LLM_API_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`.
-- `EMBEDDING_API_URL` and `EMBEDDING_DIMENSION`.
+- `POSTGRES_PASSWORD`
+- `LLM_API_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+- `EMBEDDING_API_URL`, `EMBEDDING_DIMENSION`
 
-The embedding endpoint/model used for document and query embeddings must be compatible, and its output dimension must match the PostgreSQL vector schema. The current schema is configured for 768 dimensions.
-
-**Important:** changing `POSTGRES_PASSWORD` in `.env` does not automatically change the password of a PostgreSQL user in an already-initialized data volume. Update the database role password deliberately if needed; do not delete the volume to solve an authentication mismatch.
+The example values and defaults are defined in `.env.example`.
 
 ## Run the backend
-
-Start Docker Desktop, open PowerShell in the repository root, and run:
 
 ```powershell
 docker compose up -d
 docker compose ps
 ```
 
-On the first run after changing Dockerfiles or dependencies, build the images first:
+On the first run after updating Dockerfiles or dependencies:
 
 ```powershell
 docker compose build
 docker compose up -d
 ```
 
-The Compose stack contains PostgreSQL, Redis, Retrieval Service, Document Service, Celery Worker, and RAG Service.
-
-Check service logs:
+Check logs:
 
 ```powershell
 docker compose logs -f
 ```
 
-Stop the containers without deleting persistent data:
+Stop containers without deleting volumes:
 
 ```powershell
 docker compose down
 ```
 
-Do **not** use `docker compose down -v` unless you intentionally want to delete the named volumes and their persisted data.
+Do not use `docker compose down -v` unless you intentionally want to remove the named volumes and all persisted data.
 
 ## Run the frontend
 
-The frontend is currently a host-run Vite development server. In a separate PowerShell window:
+In a separate terminal:
 
 ```powershell
 cd frontend
@@ -163,33 +220,58 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by Vite (normally http://127.0.0.1:5173).
+The frontend is a host-run Vite development server, and the UI proxies requests to the backend services on `127.0.0.1`:
 
-## API documentation and endpoints
+- `/documents/*` → `document-service`
+- `/rag/*` → `rag-service`
+- `/health/*` → service health endpoints
 
-Swagger UI:
+## API overview
 
-- RAG Orchestrator: http://127.0.0.1:8000/docs
-- Document Service: http://127.0.0.1:8001/docs
-- Retrieval Service: http://127.0.0.1:8002/docs
+Swagger UI is available at:
+
+- `http://127.0.0.1:8000/docs` — RAG Orchestrator
+- `http://127.0.0.1:8001/docs` — Document Service
+- `http://127.0.0.1:8002/docs` — Retrieval Service
+
+### Document endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/documents/upload/` | Upload a PDF (multipart field: `file`) |
-| GET | `/documents/{document_id}/status/` | Read asynchronous processing status |
-| POST | `/retrieval/search/` | Semantic vector search |
-| POST | `/rag/ask/` | Ask a question and receive an answer plus sources |
-| GET | `/health/` | Service health check |
+| `POST` | `/documents/upload/` | Upload a PDF file |
+| `GET` | `/documents/` | List documents |
+| `GET` | `/documents/{document_id}/status/` | Get processing status |
+| `GET` | `/documents/{document_id}/chat/` | Fetch chat history |
+| `POST` | `/documents/{document_id}/chat/messages/` | Save chat messages |
+| `DELETE` | `/documents/{document_id}/chat/` | Delete a document's chat history |
+| `POST` | `/documents/{document_id}/reprocess/` | Requeue a document for processing |
+| `DELETE` | `/documents/{document_id}/` | Delete document record, chat, and indexed chunks |
 
-## Operational verification
+### Retrieval endpoints
 
-Check all containers:
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/internal/index/` | Internal chunk indexing endpoint |
+| `POST` | `/search/` | Query semantic search |
+| `GET` | `/documents/{document_id}/chunks/` | Fetch chunks for a document |
+| `DELETE` | `/internal/documents/{document_id}/chunks/` | Delete document chunks |
+
+### RAG endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/rag/ask/` | Ask a question and receive answer + sources |
+| `GET` | `/health/` | Health check |
+
+## Operational checks
+
+Check container status:
 
 ```powershell
 docker compose ps
 ```
 
-Check each API health endpoint:
+Check health endpoints:
 
 ```powershell
 Invoke-RestMethod http://localhost:8000/health/
@@ -203,26 +285,25 @@ Check Celery worker responsiveness:
 docker compose exec -T celery-worker celery -A services.document_service.app.tasks.celery_app.celery_app inspect ping
 ```
 
-A healthy API response and Celery `pong` confirm that the services respond to health checks and the worker is reachable. They do not replace an end-to-end test of PDF upload, indexing, retrieval, and answer generation.
+## Important current-scope notes
 
-## Local Python development (optional)
-
-For debugging a backend service directly on Windows, stop its corresponding Compose container first to avoid a port conflict. Start PostgreSQL and Redis with Compose, then use a Python 3.12 virtual environment and install the relevant service requirements. The localhost URLs in `.env.example` are intended for host-run development; Compose overrides internal database, Redis, and inter-service URLs with Docker DNS names.
+- PDF processing is asynchronous: upload success does not mean indexing has completed.
+- Questions should only be asked after the document status becomes `completed`.
+- The frontend is a lightweight local UI, not a production deployment.
+- Authentication, authorization, rate limiting, hardened CORS policy, and production deployment are outside the current scope.
+- The project expects external embedding and chat APIs to be available and correctly configured.
+- If a PDF has no extractable text (for example, scanned image-based PDFs without OCR), it will not be processed successfully.
+- Do not commit `.env`, API keys, or database credentials.
 
 ## Tests
-
-Run unit tests from the repository root in a configured Python environment:
 
 ```powershell
 python -m pytest tests/unit -v
 ```
 
-Some tests may require external services or environment configuration depending on the test implementation.
+The test suite includes checks for PDF extraction, EmbeddingService behavior, chunk repository logic, prompt prefixing, and schema validation.
 
-## Notes and current scope
+## Summary
 
-- PDF processing is asynchronous; a successful upload means the job was accepted, not that indexing has finished.
-- Ask questions only after the document status becomes `completed`.
-- The Web UI is a lightweight development interface, not a production deployment.
-- Authentication, authorization, production CORS policy, rate limiting, and deployment hardening are outside the current scope.
-- Do not commit `.env`, API keys, or database credentials.
+This repository is a real multi-service RAG application for Persian PDFs, implemented as a local Docker Compose stack with a host-run frontend. The README is now aligned with the actual codebase: service boundaries, infrastructure, background ingestion flow, retrieval logic, LangGraph orchestration, and current limitations are consistent with what is implemented in the repository.
+
