@@ -1,22 +1,21 @@
-
 services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: rag_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-rag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -29,10 +28,112 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  retrieval-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REQUIREMENTS_FILE: services/retrieval_service/app/requirements.txt
+    container_name: rag_retrieval_service
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag_db}
+    command: >
+      sh -c "python -m services.retrieval_service.app.init_db
+      && uvicorn services.retrieval_service.app.main:app --host 0.0.0.0 --port 8002"
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/', timeout=3).read()"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
+
+  document-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REQUIREMENTS_FILE: services/document_service/app/requirements.txt
+    container_name: rag_document_service
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag_db}
+      REDIS_URL: redis://redis:6379/0
+      RETRIEVAL_SERVICE_URL: http://retrieval-service:8002
+      STORAGE_PATH: /app/storage
+    command: uvicorn services.document_service.app.main:app --host 0.0.0.0 --port 8001
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - document_storage:/app/storage
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      retrieval-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REQUIREMENTS_FILE: services/document_service/app/requirements.txt
+    container_name: rag_celery_worker
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rag_db}
+      REDIS_URL: redis://redis:6379/0
+      RETRIEVAL_SERVICE_URL: http://retrieval-service:8002
+      STORAGE_PATH: /app/storage
+    command: celery -A services.document_service.app.tasks.celery_app.celery_app worker --loglevel=info --pool=prefork --concurrency=2
+    volumes:
+      - document_storage:/app/storage
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      retrieval-service: {condition: service_healthy}
+      document-service: {condition: service_healthy}
+
+  rag-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REQUIREMENTS_FILE: services/rag_service/app/requirements.txt
+    container_name: rag_orchestrator
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      RETRIEVAL_SERVICE_URL: http://retrieval-service:8002
+    command: uvicorn services.rag_service.app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      retrieval-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
 volumes:
   postgres_data:
   redis_data:
+  document_storage:
